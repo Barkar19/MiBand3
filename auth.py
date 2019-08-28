@@ -3,7 +3,7 @@ import time
 import logging
 from datetime import datetime
 from Crypto.Cipher import AES
-from Queue import Queue, Empty
+from queue import Queue, Empty
 from bluepy.btle import Peripheral, DefaultDelegate, ADDR_TYPE_RANDOM, BTLEException
 import crc16
 import os
@@ -129,7 +129,7 @@ class MiBand3(Peripheral):
 
     def _parse_raw_accel(self, bytes):
         res = []
-        for i in xrange(3):
+        for i in range(3):
             g = struct.unpack('hhh', bytes[2 + i * 6:8 + i * 6])
             res.append({'x': g[0], 'y': g[1], 'wtf': g[2]})
         return res
@@ -139,23 +139,27 @@ class MiBand3(Peripheral):
         return res
 
     def _parse_date(self, bytes):
-        year = struct.unpack('h', bytes[0:2])[0] if len(bytes) >= 2 else None
-        month = struct.unpack('b', bytes[2])[0] if len(bytes) >= 3 else None
-        day = struct.unpack('b', bytes[3])[0] if len(bytes) >= 4 else None
-        hours = struct.unpack('b', bytes[4])[0] if len(bytes) >= 5 else None
-        minutes = struct.unpack('b', bytes[5])[0] if len(bytes) >= 6 else None
-        seconds = struct.unpack('b', bytes[6])[0] if len(bytes) >= 7 else None
-        day_of_week = struct.unpack('b', bytes[7])[0] if len(bytes) >= 8 else None
-        fractions256 = struct.unpack('b', bytes[8])[0] if len(bytes) >= 9 else None
+        print("Len = ",len(bytes))
+        # return None
+        year,month,day,hours,minutes,seconds,day_of_week = struct.unpack("hbbbbbb", bytes)
+        fractions256 = 0
+        # year = struct.unpack('h', bytes[0:2])[0] if len(bytes) >= 2 else None
+        # month = struct.unpack('b', bytes[2])[0] if len(bytes) >= 3 else None
+        # day = struct.unpack('b', bytes[3])[0] if len(bytes) >= 4 else None
+        # hours = struct.unpack('b', bytes[4])[0] if len(bytes) >= 5 else None
+        # minutes = struct.unpack('b', bytes[5])[0] if len(bytes) >= 6 else None
+        # seconds = struct.unpack('b', bytes[6])[0] if len(bytes) >= 7 else None
+        # day_of_week = struct.unpack('b', bytes[7])[0] if len(bytes) >= 8 else None
+        # fractions256 = struct.unpack('b', bytes[8])[0] if len(bytes) >= 9 else None
 
         return {"date": datetime(*(year, month, day, hours, minutes, seconds)), "day_of_week": day_of_week, "fractions256": fractions256}
 
     def _parse_battery_response(self, bytes):
-        level = struct.unpack('b', bytes[1])[0] if len(bytes) >= 2 else None
-        last_level = struct.unpack('b', bytes[19])[0] if len(bytes) >= 20 else None
-        status = 'normal' if struct.unpack('b', bytes[2])[0] == 0 else "charging"
-        datetime_last_charge = self._parse_date(bytes[11:18])
-        datetime_last_off = self._parse_date(bytes[3:10])
+        _, level, status, datetime_last_off, datetime_last_charge, last_level = struct.unpack('bbb8s8sb', bytes)
+        status = 'normal' if status == 0 else "charging"
+        print(level, status, last_level)
+        datetime_last_charge = self._parse_date(datetime_last_charge)
+        datetime_last_off = self._parse_date(datetime_last_off)
 
         res = {
             "status": status,
@@ -232,7 +236,7 @@ class MiBand3(Peripheral):
 
     def get_current_time(self):
         char = self.svc_1.getCharacteristics(UUIDS.CHARACTERISTIC_CURRENT_TIME)[0]
-        return self._parse_date(char.read()[0:9])
+        return self._parse_date(char.read()[0:8])
 
     def get_revision(self):
         svc = self.getServiceByUUID(UUIDS.SERVICE_DEVICE_INFO)
@@ -275,22 +279,19 @@ class MiBand3(Peripheral):
     def get_steps(self):
         char = self.svc_1.getCharacteristics(UUIDS.CHARACTERISTIC_STEPS)[0]
         a = char.read()
-        steps = struct.unpack('h', a[1:3])[0] if len(a) >= 3 else None
-        meters = struct.unpack('h', a[5:7])[0] if len(a) >= 7 else None
-        fat_gramms = struct.unpack('h', a[2:4])[0] if len(a) >= 4 else None
-        # why only 1 byte??
-        callories = struct.unpack('b', a[9])[0] if len(a) >= 10 else None
+        print("Lens = ", len(a))
+        #what is first byte? Ints or sth else?
+        _,steps,meters,callories = struct.unpack('=bIII',a)
         return {
             "steps": steps,
             "meters": meters,
-            "fat_gramms": fat_gramms,
             "callories": callories
         }
 
     def send_alert(self, _type):
         svc = self.getServiceByUUID(UUIDS.SERVICE_ALERT)
         char = svc.getCharacteristics(UUIDS.CHARACTERISTIC_ALERT)[0]
-        char.write(_type)
+        char.write(_type.encode('utf-8'))
 
     def send_custom_alert(self, type):
         if type == 5:
@@ -299,10 +300,10 @@ class MiBand3(Peripheral):
             base_value = '\x04\x01'
         elif type == 3:
                 base_value = '\x03\x01'
-        phone = raw_input('Sender Name or Caller ID')
+        phone = input('Sender Name or Caller ID')
         svc = self.getServiceByUUID(UUIDS.SERVICE_ALERT_NOTIFICATION)
         char = svc.getCharacteristics(UUIDS.CHARACTERISTIC_CUSTOM_ALERT)[0]
-        char.write(base_value+phone, withResponse=True)
+        char.write((base_value+phone).encode('utf-8'), withResponse=True)
 
     def change_date(self):
         print('Change date and time')
@@ -324,8 +325,8 @@ class MiBand3(Peripheral):
         # write_val =  format(rem, '#04x') + format(fraction, '#04x') + format(month, '#04x') + format(day, '#04x') + format(hour, '#04x') + format(minute, '#04x') + format(seconds, '#04x') + format(5, '#04x') + format(0, '#04x') + format(0, '#04x') +'0x16'
         # write_val = write_val.replace('0x', '\\x')
         # print(write_val)
-        char.write('\xe2\x07\x01\x1e\x00\x00\x00\x00\x00\x00\x16', withResponse=True)
-        raw_input('Date Changed, press any key to continue')
+        char.write(b'\xe2\x07\x01\x1e\x00\x00\x00\x00\x00\x00\x16', withResponse=True)
+        input('Date Changed, press any key to continue')
     def dfuUpdate(self, fileName):
         print('Update Firmware/Resource')
         svc = self.getServiceByUUID(UUIDS.SERVICE_DFU_FIRMWARE)
@@ -348,8 +349,8 @@ class MiBand3(Peripheral):
                 crc ^= (crc << 12) & 0xFFFF
                 crc ^= ((crc & 0xFF) << 5) & 0xFFFFFF
         crc &= 0xFFFF
-        print('CRC Value is-->', crc)
-        raw_input('Press Enter to Continue')
+        print(('CRC Value is-->', crc))
+        input('Press Enter to Continue')
         if extension.lower() == "res":
             # file size hex value is
             char.write('\x01'+ struct.pack("<i", fileSize)[:-1] +'\x02', withResponse=True)
@@ -361,21 +362,21 @@ class MiBand3(Peripheral):
           while True:
             c = f.read(20) #takes 20 bytes :D
             if not c:
-              print "Update Over"
+              print("Update Over")
               break
-            print('Writing Resource', c.encode('hex'))
+            print(('Writing Resource', c.encode('hex')))
             char1.write(c)
         # after update is done send these values
         char.write(b'\x00', withResponse=True)
         self.waitForNotifications(0.5)
-        print('CheckSum is --> ', hex(crc & 0xFF), hex((crc >> 8) & 0xFF))
+        print(('CheckSum is --> ', hex(crc & 0xFF), hex((crc >> 8) & 0xFF)))
         checkSum = b'\x04' + chr(crc & 0xFF) + chr((crc >> 8) & 0xFF)
         char.write(checkSum, withResponse=True)
         if extension.lower() == "fw":
             self.waitForNotifications(0.5)
             char.write('\x05', withResponse=True)
         print('Update Complete')
-        raw_input('Press Enter to Continue')
+        input('Press Enter to Continue')
     def start_raw_data_realtime(self, heart_measure_callback=None, heart_raw_callback=None, accel_raw_callback=None):
             char_m = self.svc_heart.getCharacteristics(UUIDS.CHARACTERISTIC_HEART_RATE_MEASURE)[0]
             char_d = char_m.getDescriptors(forUUID=UUIDS.NOTIFICATION_DESCRIPTOR)[0]
